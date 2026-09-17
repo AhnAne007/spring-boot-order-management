@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [product-service, order-service]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - name: Verify
+        run: mvn -B verify
+        working-directory: ${{ matrix.service }}
+      - name: Build Docker image
+        run: docker build -t ${{ matrix.service }}:ci .
+        working-directory: ${{ matrix.service }}
