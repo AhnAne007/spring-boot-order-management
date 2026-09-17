@@ -38,7 +38,7 @@ class OrderMessagePublisherTest {
     void fallbackThrowsMessagingUnavailableException() throws Exception {
         StockReservationMessage message = new StockReservationMessage(1L, 3, "order-2");
         Throwable reason = new AmqpException("Broker unavailable");
-        // Invoke the private fallback directly, preserving Step 5's exact signature.
+        // Invoke the private fallback directly to verify the fallback exception contract.
         Method fallback = OrderMessagePublisher.class.getDeclaredMethod(
                 "publishFallback", StockReservationMessage.class, Throwable.class);
         fallback.setAccessible(true);

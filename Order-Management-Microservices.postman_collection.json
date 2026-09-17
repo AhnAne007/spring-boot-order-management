@@ -1,0 +1,713 @@
+{
+  "info": {
+    "_postman_id": "cb01aee8-9101-4d7a-a85b-1f20df175a36",
+    "name": "Order Management Microservices",
+    "description": "Requests for validating the Product Service, Order Service, RabbitMQ flow, validation, and Resilience4j circuit breaker.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "productBaseUrl",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "orderBaseUrl",
+      "value": "http://localhost:8082"
+    },
+    {
+      "key": "productId",
+      "value": "1"
+    },
+    {
+      "key": "initialStock",
+      "value": "10"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 - Normal Flow",
+      "item": [
+        {
+          "name": "Create Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{productBaseUrl}}/products",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Rice\",\n  \"price\": 150.00,\n  \"stock\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('productId', json.id);",
+                  "pm.collectionVariables.set('initialStock', json.stock);",
+                  "pm.test('Product fields are correct', () => { pm.expect(json.name).to.eql('Rice'); pm.expect(json.stock).to.eql(10); });"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Product Before Order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{productBaseUrl}}/products/{{productId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Initial stock is 10', () => pm.expect(json.stock).to.eql(10));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "After this succeeds, wait about 2 seconds before running 'Get Product After Order' because stock consumption is asynchronous."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Order is PENDING', () => pm.expect(json.status).to.eql('PENDING'));",
+                  "pm.test('Order quantity is 3', () => pm.expect(json.quantity).to.eql(3));",
+                  "pm.collectionVariables.set('orderId', json.orderId);"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Product After Order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{productBaseUrl}}/products/{{productId}}",
+            "description": "Run about 2 seconds after Create Order so Product Service has time to consume the message."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Stock reduced from 10 to 7', () => pm.expect(json.stock).to.eql(7));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{productBaseUrl}}/products"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is an array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Business Edge Cases",
+      "item": [
+        {
+          "name": "Order With Insufficient Stock",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Product Service should log insufficient stock and leave stock unchanged."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Publishing succeeds with 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Order is PENDING', () => pm.expect(pm.response.json().status).to.eql('PENDING'));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order For Unknown Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": 9223372036854775807,\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Product Service should log that the product does not exist."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Publishing succeeds with 201', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Missing Product",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{productBaseUrl}}/products/9223372036854775807"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Validation",
+      "item": [
+        {
+          "name": "Missing productId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Zero quantity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Negative quantity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": -1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid Product Body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{productBaseUrl}}/products",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"price\": 0,\n  \"stock\": -1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Circuit Breaker Demo",
+      "description": "Stop RabbitMQ before Outage Order 1. After checking the OPEN state, restart RabbitMQ and wait before running the recovery probes.",
+      "item": [
+        {
+          "name": "Outage Order 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Run only after executing: docker compose stop rabbitmq"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 503 while RabbitMQ is stopped', () => pm.response.to.have.status(503));",
+                  "const json = pm.response.json();",
+                  "pm.test('Error contains orderId', () => { pm.expect(json.error).to.be.a('string'); pm.expect(json.orderId).to.be.a('string'); });"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Outage Order 2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Run only after executing: docker compose stop rabbitmq"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 503 while RabbitMQ is stopped', () => pm.response.to.have.status(503));",
+                  "const json = pm.response.json();",
+                  "pm.test('Error contains orderId', () => { pm.expect(json.error).to.be.a('string'); pm.expect(json.orderId).to.be.a('string'); });"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Outage Order 3",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Run only after executing: docker compose stop rabbitmq"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 503 while RabbitMQ is stopped', () => pm.response.to.have.status(503));",
+                  "const json = pm.response.json();",
+                  "pm.test('Error contains orderId', () => { pm.expect(json.error).to.be.a('string'); pm.expect(json.orderId).to.be.a('string'); });"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Outage Order 4",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Run only after executing: docker compose stop rabbitmq"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 503 while RabbitMQ is stopped', () => pm.response.to.have.status(503));",
+                  "const json = pm.response.json();",
+                  "pm.test('Error contains orderId', () => { pm.expect(json.error).to.be.a('string'); pm.expect(json.orderId).to.be.a('string'); });"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Circuit Breaker State",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{orderBaseUrl}}/actuator/circuitbreakers",
+            "description": "Inspect promptly after the outage requests. The breaker automatically moves from OPEN to HALF_OPEN after 15 seconds."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('stockPublisher is present', () => pm.expect(JSON.stringify(pm.response.json())).to.include('stockPublisher'));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recovery Probe 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Before running, execute 'docker compose start rabbitmq', wait for RabbitMQ to be healthy, and wait at least 20 seconds from the OPEN state."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201 after RabbitMQ recovers', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recovery Probe 2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{orderBaseUrl}}/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201 after RabbitMQ recovers', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Circuit Breaker State After Recovery",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{orderBaseUrl}}/actuator/circuitbreakers"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('stockPublisher is present', () => pm.expect(JSON.stringify(pm.response.json())).to.include('stockPublisher'));"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
