@@ -1,6 +1,7 @@
 package com.example.order.config;
 
 import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -10,7 +11,13 @@ import org.springframework.context.annotation.Configuration;
 public class RabbitConfig {
     public static final String QUEUE = "stock-reservation-queue";
     @Bean
-    public Queue stockReservationQueue() { return new Queue(QUEUE, true); }
+    public Queue stockReservationQueue() {
+        // Must match Product Service's declaration of this shared broker queue.
+        return QueueBuilder.durable(QUEUE)
+                .deadLetterExchange("stock-dlx")
+                .deadLetterRoutingKey("stock-reservation-dlq")
+                .build();
+    }
     @Bean
     public Jackson2JsonMessageConverter jsonMessageConverter() {
         return new Jackson2JsonMessageConverter();

@@ -1,4 +1,6 @@
-# Order Management — Steps 1–7
+# Order Management — Steps 1–9
+
+**Step 9:** DLQ and listener error handling are added. Read [STEP-9.md](STEP-9.md) before upgrading an existing queue. GitHub Actions CI is present from Step 8. See [FILE-CHECKLIST.md](FILE-CHECKLIST.md) for all files.
 
 **Current startup: run `docker compose up --build -d` to start all four containers. See [STEP-7.md](STEP-7.md). The local Maven startup examples below describe the earlier workflow; to use them now, start only infrastructure with `docker compose up -d postgres rabbitmq` and keep the application containers stopped.**
 
@@ -6,7 +8,7 @@
 
 **Step 5 is implemented. See [STEP-5.md](STEP-5.md) for breaker configuration, failure handling and exact outage/recovery verification commands.**
 
-This checkpoint implements Steps 1–7. Two independent Maven projects; Java 21; Spring Boot 3.3.13; Resilience4j 2.2.0 dependency and AOP already present in Order Service. No root POM, shared module, CI workflow, retries, Flyway, Lombok, MapStruct, security features, or order status workflow have been added.
+This checkpoint implements Steps 1–9. Two independent Maven projects; Java 21; Spring Boot 3.3.13; Resilience4j 2.2.0 dependency and AOP already present in Order Service. No root POM, shared module, retries, Flyway, Lombok, MapStruct, security features, or order status workflow have been added.
 
 ## Implemented requirements
 
@@ -19,7 +21,7 @@ This is one-way messaging: Order Service publishes and Product Service consumes.
 
 ## Verification status
 
-Both POM XML files, YAML structure, project-local imports/packages, matching message records, requested Compose settings and ZIP integrity were checked during preparation. This environment has Java 17, no Maven and no Docker, so **Java 21 compilation, tests and live container execution were not performed here**. Run the following commands before treating the checkpoint as verified. Six plain JUnit/Mockito tests are present as of Step 6 (three per service); they remain unexecuted in the preparation environment.
+Both POM XML files, YAML structure, project-local imports/packages, matching message records, requested Compose settings and ZIP integrity were checked during preparation. This environment has Java 17, no Maven and no Docker, so **Java 21 compilation, tests and live container execution were not performed here**. Run the following commands before treating the checkpoint as verified. Eleven tests are present as of Step 9 (five Product, six Order), including standalone MVC validation checks; they remain unexecuted in the preparation environment.
 
 ## Step 1 verification — build each independent project
 
@@ -211,7 +213,7 @@ Invoke-RestMethod 'http://localhost:8082/actuator/metrics'
 
 - The publisher now has the Step 5 circuit breaker. Publishing failures handled by its fallback save FAILED and return 503. Publisher confirms are still absent; see STEP-5.md for the precise guarantees.
 - The listener logs/returns for unknown products and insufficient stock. It also rejects nonpositive message quantities without changing stock.
-- Runtime failures inside listener processing are logged and the transaction marked rollback-only. Conversion, transaction-start and commit errors can occur outside the method; `default-requeue-rejected: false` prevents the normal endless requeue behavior for unhandled listener failures. No retry or DLQ is configured, so failed messages can be lost. A transactional method cannot guarantee that infrastructure never raises an exception.
+- Runtime failures inside listener processing are logged and the transaction marked rollback-only. Conversion, transaction-start and commit errors can occur outside the method; `default-requeue-rejected: false` prevents the normal endless requeue behavior for unhandled listener failures. No retry is configured. Step 9 adds a DLQ for messages rejected by the container; failures swallowed by the listener can still be lost. A transactional method cannot guarantee that infrastructure never raises an exception.
 - The requested stock logic does not implement duplicate detection or concurrent-consumer stock locking. Keep the single-consumer default for this exercise; exactly-once processing is not claimed.
 - There is no stock-result message back to Order Service, no GET /orders endpoint and no reservation-status endpoint at this step. The old Postman collection was for a different project version; use the commands here.
 
